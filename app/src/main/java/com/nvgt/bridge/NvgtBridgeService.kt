@@ -2,12 +2,14 @@ package com.nvgt.bridge
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.ComponentName
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.graphics.Region
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityWindowInfo
 
 class NvgtBridgeService : AccessibilityService() {
@@ -15,81 +17,125 @@ class NvgtBridgeService : AccessibilityService() {
 	companion object {
 		private const val NVGT_METADATA_KEY = "org.nvgt.capability.DIRECT_TOUCH"
 		private const val TAG = "NVGT_BRIDGE"
+		private const val PREFS_NAME = "nvgt_bridge_prefs"
+		private const val KEY_ENABLED_APPS = "enabled_app_packages"
+		
+		private val IGNORED_SYSTEM_PACKAGES = setOf("android", "com.android.systemui", "com.android.inputmethod")
 	}
 
 	private var currentNvgtPackage: String? = null
+	private lateinit var prefs: SharedPreferences
+	private var accessibilityManager: AccessibilityManager? = null
+
+	private val servicesStateChangeListener = AccessibilityManager.AccessibilityServicesStateChangeListener {
+		if (!isOtherTouchExplorationEnabled()) {
+			Log.w(TAG, "Touch exploration disabled. Killing Bridge.")
+			disableDirectTouch()
+		}
+	}
 
 	override fun onServiceConnected() {
 		super.onServiceConnected()
-		Log.e(TAG, "!!! BRIDGE SERVICE STARTED !!!")
+		Log.i(TAG, "Bridge Service Connected")
+		prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+		
+		accessibilityManager = getSystemService(ACCESSIBILITY_SERVICE) as? AccessibilityManager
+		accessibilityManager?.addAccessibilityServicesStateChangeListener(servicesStateChangeListener)
 		
 		val info = serviceInfo
 		info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
 		serviceInfo = info
 	}
 
+	override fun onDestroy() {
+		super.onDestroy()
+		accessibilityManager?.removeAccessibilityServicesStateChangeListener(servicesStateChangeListener)
+	}
+
 	override fun onAccessibilityEvent(event: AccessibilityEvent) {
-		if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-			handleWindowStateChanged(event)
-		} else if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-			if (currentNvgtPackage != null) {
-				updatePassthroughRegion()
-			}
+		when (event.eventType) {
+			AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
+			AccessibilityEvent.TYPE_WINDOWS_CHANGED -> if (currentNvgtPackage != null) updatePassthroughRegion()
+			else -> {}
 		}
 	}
 
 	override fun onInterrupt() {
-		Log.w(TAG, "System Interrupted Service.")
-		if (currentNvgtPackage != null) {
-			updatePassthroughRegion()
-		}
+		Log.w(TAG, "Service Interrupted")
 	}
 
 	private fun handleWindowStateChanged(event: AccessibilityEvent) {
+		if (!isOtherTouchExplorationEnabled()) {
+			if (currentNvgtPackage != null) disableDirectTouch()
+			return
+		}
+
 		val packageName = event.packageName?.toString() ?: return
-		val className = event.className?.toString() ?: return
-		
+
 		if (currentNvgtPackage != null) {
-			if (packageName == currentNvgtPackage) {
+			if (IGNORED_SYSTEM_PACKAGES.any { packageName.contains(it) }) {
 				updatePassthroughRegion()
 				return
 			}
-			if (packageName.contains("android") || packageName.contains("systemui") || packageName.contains("launcher")) {
-				return
-			}
 		}
 
-		val componentName = ComponentName(packageName, className)
-
-		try {
-			val activityInfo = packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA)
-			val isNvgt = activityInfo.metaData?.getBoolean(NVGT_METADATA_KEY, false) == true
-
-			if (isNvgt) {
-				Log.e(TAG, ">>> NVGT GAME DETECTED: $packageName <<<")
+		if (shouldEnableBridgeForPackage(packageName)) {
+			if (currentNvgtPackage != packageName) {
+				Log.i(TAG, "Target detected: $packageName")
 				currentNvgtPackage = packageName
-				enableDirectTouch()
-			} else {
-				if (currentNvgtPackage != null) {
-					Log.i(TAG, "Switching to non-game app. Disabling Bridge.")
-					disableDirectTouch()
-				}
 			}
-		} catch (e: PackageManager.NameNotFoundException) {
+			enableDirectTouch()
+		} else if (currentNvgtPackage != null) {
+			Log.i(TAG, "Exited target to '$packageName'. Disabling Bridge.")
+			disableDirectTouch()
 		}
 	}
 
+	private fun isOtherTouchExplorationEnabled(): Boolean {
+		val am = accessibilityManager ?: return false
+		val services = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+		
+		return services.any { service ->
+			service.resolveInfo.serviceInfo.packageName != packageName &&
+			(service.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE) != 0
+		}
+	}
+
+	private fun shouldEnableBridgeForPackage(packageName: String): Boolean {
+		val enabledPackages = prefs.getStringSet(KEY_ENABLED_APPS, emptySet())
+		if (enabledPackages?.contains(packageName) == true) return true
+
+		val pm = packageManager
+		
+		try {
+			val appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+			if (appInfo.metaData?.getBoolean(NVGT_METADATA_KEY, false) == true) return true
+		} catch (_: Exception) {}
+
+		try {
+			val launchIntent = pm.getLaunchIntentForPackage(packageName)
+			launchIntent?.component?.let { component ->
+				val activityInfo = pm.getActivityInfo(component, PackageManager.GET_META_DATA)
+				if (activityInfo.metaData?.getBoolean(NVGT_METADATA_KEY, false) == true) return true
+			}
+		} catch (_: Exception) {}
+		
+		return false
+	}
+
 	private fun enableDirectTouch() {
-		Log.e(TAG, "ENABLING TOUCH PASSTHROUGH MODE")
 		val info = serviceInfo
-		info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
-		info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-		serviceInfo = info
+		if ((info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE) == 0) {
+			Log.i(TAG, "Enabling Direct Touch Mode")
+			info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
+			info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+			serviceInfo = info
+		}
 		updatePassthroughRegion()
 	}
 
 	private fun disableDirectTouch() {
-		Log.i(TAG, "Disabling Touch Passthrough Mode")
+		Log.i(TAG, "Disabling Direct Touch Mode")
 		currentNvgtPackage = null
 		val info = serviceInfo
 		info.flags = info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
@@ -101,33 +147,18 @@ class NvgtBridgeService : AccessibilityService() {
 		if (currentNvgtPackage == null) return
 
 		val metrics = resources.displayMetrics
-		
 		val finalRegion = Region(0, 0, metrics.widthPixels, metrics.heightPixels)
-		
-		val safeHeight = (metrics.heightPixels * 0.15).toInt()
-		val safeRect = Rect(0, metrics.heightPixels - safeHeight, metrics.widthPixels, metrics.heightPixels)
-		finalRegion.op(safeRect, Region.Op.DIFFERENCE)
-
-		val windows = windows
 		val windowBounds = Rect()
-		var keyboardFound = false
 
-		if (windows.isNotEmpty()) {
-			for (window in windows) {
-				if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
-					window.getBoundsInScreen(windowBounds)
-					finalRegion.op(windowBounds, Region.Op.DIFFERENCE)
-					keyboardFound = true
-				}
+		windows.forEach { window ->
+			if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD || window.type == AccessibilityWindowInfo.TYPE_SYSTEM) {
+				window.getBoundsInScreen(windowBounds)
+				finalRegion.op(windowBounds, Region.Op.DIFFERENCE)
 			}
 		}
 
-		if (keyboardFound) {
-			Log.d(TAG, "Keyboard detected. Adjusted passthrough region.")
+		if (!finalRegion.isEmpty) {
+			setTouchExplorationPassthroughRegion(0, finalRegion)
 		}
-
-		if (finalRegion.isEmpty) return
-
-		setTouchExplorationPassthroughRegion(0, finalRegion)
 	}
 }
