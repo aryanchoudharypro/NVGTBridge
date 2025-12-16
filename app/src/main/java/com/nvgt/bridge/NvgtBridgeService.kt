@@ -22,6 +22,10 @@ class NvgtBridgeService : AccessibilityService() {
 	override fun onServiceConnected() {
 		super.onServiceConnected()
 		Log.e(TAG, "!!! BRIDGE SERVICE STARTED !!!")
+		
+		val info = serviceInfo
+		info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+		serviceInfo = info
 	}
 
 	override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -37,8 +41,7 @@ class NvgtBridgeService : AccessibilityService() {
 	override fun onInterrupt() {
 		Log.w(TAG, "System Interrupted Service.")
 		if (currentNvgtPackage != null) {
-			Log.w(TAG, "In-Game Interrupt detected. Force refreshing Direct Touch...")
-			refreshDirectTouch()
+			updatePassthroughRegion()
 		}
 	}
 
@@ -80,18 +83,8 @@ class NvgtBridgeService : AccessibilityService() {
 		Log.e(TAG, "ENABLING TOUCH PASSTHROUGH MODE")
 		val info = serviceInfo
 		info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
+		info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
 		serviceInfo = info
-		updatePassthroughRegion()
-	}
-
-	private fun refreshDirectTouch() {
-		val info = serviceInfo
-		info.flags = info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
-		serviceInfo = info
-		
-		info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
-		serviceInfo = info
-		
 		updatePassthroughRegion()
 	}
 
@@ -117,13 +110,20 @@ class NvgtBridgeService : AccessibilityService() {
 
 		val windows = windows
 		val windowBounds = Rect()
+		var keyboardFound = false
+
 		if (windows.isNotEmpty()) {
 			for (window in windows) {
 				if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
 					window.getBoundsInScreen(windowBounds)
 					finalRegion.op(windowBounds, Region.Op.DIFFERENCE)
+					keyboardFound = true
 				}
 			}
+		}
+
+		if (keyboardFound) {
+			Log.d(TAG, "Keyboard detected. Adjusted passthrough region.")
 		}
 
 		if (finalRegion.isEmpty) return
