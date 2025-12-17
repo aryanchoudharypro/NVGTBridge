@@ -31,12 +31,17 @@ class SettingsActivity : AppCompatActivity() {
 		val recyclerView: RecyclerView = findViewById(R.id.apps_recycler_view)
 		recyclerView.layoutManager = LinearLayoutManager(this)
 		appsAdapter = AppsAdapter(appsList) { app, isEnabled ->
-			if (isEnabled) {
-				enabledApps.add(app.packageName)
-			} else {
-				enabledApps.remove(app.packageName)
+			val index = appsList.indexOfFirst { it.packageName == app.packageName }
+			if (index != -1) {
+				val updatedApp = appsList[index].copy(isEnabled = isEnabled)
+				appsList[index] = updatedApp
+				if (isEnabled) {
+					enabledApps.add(app.packageName)
+				} else {
+					enabledApps.remove(app.packageName)
+				}
+				saveEnabledApps()
 			}
-			saveEnabledApps()
 			Log.d("SettingsActivity", "App ${app.name} isEnabled: $isEnabled")
 		}
 		recyclerView.adapter = appsAdapter
@@ -70,7 +75,7 @@ class SettingsActivity : AppCompatActivity() {
 
 	private fun saveEnabledApps() {
 		val prefs = getSharedPreferences("nvgt_bridge_prefs", MODE_PRIVATE)
-		prefs.edit().putStringSet("enabled_app_packages", enabledApps).apply()
+		prefs.edit().putStringSet("enabled_app_packages", enabledApps).commit()
 	}
 
 	private fun loadEnabledApps() {

@@ -18,7 +18,15 @@ class AppsAdapter(
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
 		val view = LayoutInflater.from(parent.context)
 			.inflate(R.layout.item_app, parent, false)
-		return ViewHolder(view)
+		val viewHolder = ViewHolder(view)
+		viewHolder.appSwitch.setOnCheckedChangeListener { _, isChecked ->
+			val position = viewHolder.adapterPosition
+			if (position != RecyclerView.NO_POSITION) {
+				val app = filteredApps[position]
+				onSwitchChanged(app, isChecked)
+			}
+		}
+		return viewHolder
 	}
 
 	override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -26,10 +34,6 @@ class AppsAdapter(
 		holder.appName.text = app.name
 		holder.appIcon.setImageDrawable(app.icon)
 		holder.appSwitch.isChecked = app.isEnabled
-		holder.appSwitch.setOnCheckedChangeListener { _, isChecked ->
-			app.isEnabled = isChecked
-			onSwitchChanged(app, isChecked)
-		}
 	}
 
 	override fun getItemCount(): Int {
