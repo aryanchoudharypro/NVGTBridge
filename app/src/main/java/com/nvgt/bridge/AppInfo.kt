@@ -8,4 +8,3 @@ data class AppInfo(
 	val icon: Drawable,
 	var isEnabled: Boolean
 )
-	

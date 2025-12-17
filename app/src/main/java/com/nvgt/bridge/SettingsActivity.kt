@@ -1,6 +1,5 @@
 package com.nvgt.bridge
 
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.text.Editable
@@ -26,15 +25,24 @@ class SettingsActivity : AppCompatActivity() {
 		setSupportActionBar(toolbar)
 
 		loadEnabledApps()
-		loadInstalledApps()
+		
+		Thread {
+			loadInstalledApps()
+			runOnUiThread {
+				if (::appsAdapter.isInitialized) {
+					appsAdapter.filter("")
+				}
+			}
+		}.start()
 
 		val recyclerView: RecyclerView = findViewById(R.id.apps_recycler_view)
 		recyclerView.layoutManager = LinearLayoutManager(this)
+		
 		appsAdapter = AppsAdapter(appsList) { app, isEnabled ->
 			val index = appsList.indexOfFirst { it.packageName == app.packageName }
 			if (index != -1) {
-				val updatedApp = appsList[index].copy(isEnabled = isEnabled)
-				appsList[index] = updatedApp
+				appsList[index].isEnabled = isEnabled
+				
 				if (isEnabled) {
 					enabledApps.add(app.packageName)
 				} else {
@@ -61,25 +69,35 @@ class SettingsActivity : AppCompatActivity() {
 	private fun loadInstalledApps() {
 		val pm = packageManager
 		val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+		
+		val tempAppList = mutableListOf<AppInfo>()
+		
 		for (packageInfo in packages) {
 			if (pm.getLaunchIntentForPackage(packageInfo.packageName) != null) {
 				val appName = packageInfo.loadLabel(pm).toString()
 				val appIcon = packageInfo.loadIcon(pm)
 				val packageName = packageInfo.packageName
 				val isEnabled = enabledApps.contains(packageName)
-				appsList.add(AppInfo(appName, packageName, appIcon, isEnabled))
+				tempAppList.add(AppInfo(appName, packageName, appIcon, isEnabled))
 			}
 		}
-		appsList.sortBy { it.name }
+		tempAppList.sortBy { it.name }
+		
+		appsList.clear()
+		appsList.addAll(tempAppList)
 	}
 
 	private fun saveEnabledApps() {
 		val prefs = getSharedPreferences("nvgt_bridge_prefs", MODE_PRIVATE)
-		prefs.edit().putStringSet("enabled_app_packages", enabledApps).commit()
+		prefs.edit().putStringSet("enabled_app_packages", enabledApps.toSet()).apply()
 	}
 
 	private fun loadEnabledApps() {
 		val prefs = getSharedPreferences("nvgt_bridge_prefs", MODE_PRIVATE)
-		enabledApps.addAll(prefs.getStringSet("enabled_app_packages", emptySet()) ?: emptySet())
+		val savedSet = prefs.getStringSet("enabled_app_packages", emptySet())
+		enabledApps.clear()
+		if (savedSet != null) {
+			enabledApps.addAll(savedSet)
+		}
 	}
 }

@@ -20,8 +20,12 @@ class NvgtBridgeService : AccessibilityService() {
 		private const val TAG = "NVGT_BRIDGE"
 		private const val PREFS_NAME = "nvgt_bridge_prefs"
 		private const val KEY_ENABLED_APPS = "enabled_app_packages"
-		
-		private val IGNORED_SYSTEM_PACKAGES = setOf("android", "com.android.systemui", "com.android.inputmethod")
+		private val IGNORED_SYSTEM_PACKAGES = setOf(
+			"com.android.systemui",
+			"com.android.inputmethod",
+			"com.google.android.inputmethod",
+			"android"
+		)
 	}
 
 	private var currentNvgtPackage: String? = null
@@ -35,11 +39,18 @@ class NvgtBridgeService : AccessibilityService() {
 		}
 	}
 
+	private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+		if (key == KEY_ENABLED_APPS) {
+			Log.i(TAG, "Enabled apps updated")
+		}
+	}
+
 	@SuppressLint("NewApi")
 	override fun onServiceConnected() {
 		super.onServiceConnected()
 		Log.i(TAG, "Bridge Service Connected")
 		prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+		prefs.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
 		
 		accessibilityManager = getSystemService(ACCESSIBILITY_SERVICE) as? AccessibilityManager
 		accessibilityManager?.addAccessibilityServicesStateChangeListener(servicesStateChangeListener)
@@ -52,13 +63,18 @@ class NvgtBridgeService : AccessibilityService() {
 	@SuppressLint("NewApi")
 	override fun onDestroy() {
 		super.onDestroy()
+		prefs.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
 		accessibilityManager?.removeAccessibilityServicesStateChangeListener(servicesStateChangeListener)
 	}
 
 	override fun onAccessibilityEvent(event: AccessibilityEvent) {
 		when (event.eventType) {
 			AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
-			AccessibilityEvent.TYPE_WINDOWS_CHANGED -> if (currentNvgtPackage != null) updatePassthroughRegion()
+			AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+				if (currentNvgtPackage != null) {
+					updatePassthroughRegion()
+				}
+			}
 			else -> {}
 		}
 	}
@@ -68,30 +84,31 @@ class NvgtBridgeService : AccessibilityService() {
 	}
 
 	private fun handleWindowStateChanged(event: AccessibilityEvent) {
-		if (!isOtherTouchExplorationEnabled()) {
-			if (currentNvgtPackage != null) disableDirectTouch()
+		val packageName = event.packageName?.toString() ?: return
+		if (packageName == currentNvgtPackage) {
+			enableDirectTouch() 
 			return
 		}
-
-		val packageName = event.packageName?.toString() ?: return
-
-		if (currentNvgtPackage != null) {
-			if (IGNORED_SYSTEM_PACKAGES.any { packageName.contains(it) }) {
+		if (isSystemPackage(packageName)) {
+			if (currentNvgtPackage != null) {
 				updatePassthroughRegion()
-				return
 			}
+			return
 		}
-
 		if (shouldEnableBridgeForPackage(packageName)) {
-			if (currentNvgtPackage != packageName) {
-				Log.i(TAG, "Target detected: $packageName")
-				currentNvgtPackage = packageName
-			}
+			Log.i(TAG, "Target detected: $packageName")
+			currentNvgtPackage = packageName
 			enableDirectTouch()
-		} else if (currentNvgtPackage != null) {
+			return
+		}
+		if (currentNvgtPackage != null) {
 			Log.i(TAG, "Exited target to '$packageName'. Disabling Bridge.")
 			disableDirectTouch()
 		}
+	}
+
+	private fun isSystemPackage(packageName: String): Boolean {
+		return IGNORED_SYSTEM_PACKAGES.any { packageName.contains(it, ignoreCase = true) }
 	}
 
 	private fun isOtherTouchExplorationEnabled(): Boolean {
