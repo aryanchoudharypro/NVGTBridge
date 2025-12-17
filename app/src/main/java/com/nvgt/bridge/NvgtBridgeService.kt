@@ -1,5 +1,6 @@
 package com.nvgt.bridge
 
+import android.annotation.SuppressLint
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
@@ -34,6 +35,7 @@ class NvgtBridgeService : AccessibilityService() {
 		}
 	}
 
+	@SuppressLint("NewApi")
 	override fun onServiceConnected() {
 		super.onServiceConnected()
 		Log.i(TAG, "Bridge Service Connected")
@@ -47,6 +49,7 @@ class NvgtBridgeService : AccessibilityService() {
 		serviceInfo = info
 	}
 
+	@SuppressLint("NewApi")
 	override fun onDestroy() {
 		super.onDestroy()
 		accessibilityManager?.removeAccessibilityServicesStateChangeListener(servicesStateChangeListener)

@@ -6,4 +6,5 @@
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
     android:canRequestTouchExplorationMode="true"
+    android:settingsActivity="com.nvgt.bridge.SettingsActivity"
     android:accessibilityFlags="flagDefault" />
