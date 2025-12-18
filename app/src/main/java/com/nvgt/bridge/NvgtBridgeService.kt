@@ -13,7 +13,6 @@ import android.graphics.Region
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
@@ -23,10 +22,10 @@ class NvgtBridgeService : AccessibilityService() {
 
 	companion object {
 		private const val NVGT_METADATA_KEY = "org.nvgt.capability.DIRECT_TOUCH"
-		private const val TAG = "NVGT_BRIDGE"
 		private const val PREFS_NAME = "nvgt_bridge_prefs"
 		private const val KEY_ENABLED_APPS = "enabled_app_packages"
 		private const val DEBOUNCE_DELAY = 150L
+		
 		private val IGNORED_SYSTEM_PACKAGES = setOf(
 			"com.android.systemui",
 			"com.android.inputmethod",
@@ -116,10 +115,19 @@ class NvgtBridgeService : AccessibilityService() {
 		val rootWindow = allWindows.find { it.isFocused } ?: allWindows.firstOrNull()
 		val currentAppPackage = rootWindow?.root?.packageName?.toString() ?: return
 
+		val displayMetrics = resources.displayMetrics
+		val screenHeight = displayMetrics.heightPixels
+
 		val isSystemUIInFront = allWindows.any { window ->
-			window.isActive && 
-			window.type == AccessibilityWindowInfo.TYPE_SYSTEM && 
-			window.root?.packageName?.toString() == "com.android.systemui"
+			if (window.isActive && 
+				window.type == AccessibilityWindowInfo.TYPE_SYSTEM && 
+				window.root?.packageName?.toString() == "com.android.systemui") {
+				
+				val bounds = Rect()
+				window.getBoundsInScreen(bounds)
+				return@any bounds.height() > (screenHeight / 2)
+			}
+			false
 		}
 
 		if (isSystemUIInFront || IGNORED_SYSTEM_PACKAGES.contains(currentAppPackage)) {
@@ -141,34 +149,48 @@ class NvgtBridgeService : AccessibilityService() {
 	}
 
 	private fun checkForNativeUI(): Boolean {
-		windows.forEach { window ->
-			if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION || 
-				window.type == AccessibilityWindowInfo.TYPE_SYSTEM) {
-				val root = window.root ?: return@forEach
-				if (scanNodeForDialogs(root)) return true
+		return windows.any { window ->
+			if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION && 
+				window.type != AccessibilityWindowInfo.TYPE_SYSTEM) {
+				return@any false
 			}
+
+			val root = window.root ?: return@any false
+			val pkg = root.packageName?.toString()
+
+			if (IGNORED_SYSTEM_PACKAGES.contains(pkg)) {
+				return@any false
+			}
+			
+			scanNodeForDialogs(root, 0)
 		}
-		return false
 	}
 
-	private fun scanNodeForDialogs(node: AccessibilityNodeInfo): Boolean {
+	private fun scanNodeForDialogs(node: AccessibilityNodeInfo, depth: Int): Boolean {
+		if (depth > 10) return false
+
 		val className = node.className?.toString() ?: ""
 		
-		if (className.contains("EditText", ignoreCase = true) || 
-			className.contains("AlertDialog", ignoreCase = true) ||
+		if (className.contains("AlertDialog", ignoreCase = true) ||
 			className.contains("android.app.Dialog", ignoreCase = true)) {
 			return true
 		}
 
-		val text = node.text?.toString()?.lowercase() ?: ""
-		val commonDialogButtons = setOf("ok", "cancel", "yes", "no", "dismiss", "close")
-		if (node.isClickable && commonDialogButtons.contains(text)) {
+		if (className.contains("EditText", ignoreCase = true)) {
+			return true
+		}
+
+		if (node.isClickable && className.endsWith("Button")) {
 			return true
 		}
 		
 		for (i in 0 until node.childCount) {
 			val child = node.getChild(i) ?: continue
-			if (scanNodeForDialogs(child)) return true
+			if (scanNodeForDialogs(child, depth + 1)) {
+				child.recycle()
+				return true
+			}
+			child.recycle()
 		}
 		return false
 	}
@@ -202,26 +224,11 @@ class NvgtBridgeService : AccessibilityService() {
 	}
 
 	private fun enableDirectTouch() {
-		val info = serviceInfo
-		var changed = false
-
-		if ((info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE) == 0) {
-			info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
-			changed = true
-		}
-
-		if (changed) serviceInfo = info
 		updatePassthroughRegion()
 	}
 
 	private fun disableDirectTouch(keepPackage: Boolean = false) {
 		if (!keepPackage) currentNvgtPackage = null
-		
-		val info = serviceInfo
-		if ((info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE) != 0) {
-			info.flags = info.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
-			serviceInfo = info
-		}
 		
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 			setTouchExplorationPassthroughRegion(0, Region())
