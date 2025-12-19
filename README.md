@@ -57,7 +57,7 @@ Add the following `<meta-data>` tag to your `AndroidManifest.xml` inside either 
 
 ```xml
 <meta-data
-	android:name="org.nvgt.capability.DIRECT_TOUCH"
+	android:name="dev.nvgt.capability.DIRECT_TOUCH"
 	android:value="true" />
 
 ```
