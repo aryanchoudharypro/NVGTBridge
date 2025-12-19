@@ -6,5 +6,6 @@ data class AppInfo(
 	val name: String,
 	val packageName: String,
 	val icon: Drawable,
-	var isEnabled: Boolean
+	var isEnabled: Boolean,
+	var directTyping: Boolean
 )

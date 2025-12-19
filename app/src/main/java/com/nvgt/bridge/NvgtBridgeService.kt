@@ -21,7 +21,6 @@ import android.view.accessibility.AccessibilityWindowInfo
 class NvgtBridgeService : AccessibilityService() {
 
 	companion object {
-		private const val NVGT_METADATA_KEY = "org.nvgt.capability.DIRECT_TOUCH"
 		private const val PREFS_NAME = "nvgt_bridge_prefs"
 		private const val KEY_ENABLED_APPS = "enabled_app_packages"
 		private const val DEBOUNCE_DELAY = 150L
@@ -39,6 +38,7 @@ class NvgtBridgeService : AccessibilityService() {
 	private lateinit var prefs: SharedPreferences
 	private var accessibilityManager: AccessibilityManager? = null
 	private val targetCache = mutableMapOf<String, Boolean>()
+	private val directTypingCache = mutableMapOf<String, Boolean>()
 	
 	private val handler = Handler(Looper.getMainLooper())
 	private val updateRunnable = Runnable { performUpdate() }
@@ -60,6 +60,9 @@ class NvgtBridgeService : AccessibilityService() {
 	private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
 		if (key == KEY_ENABLED_APPS) {
 			targetCache.clear()
+		}
+		if (key != null && key.startsWith("direct_typing_")) {
+			directTypingCache.clear()
 		}
 	}
 
@@ -91,6 +94,7 @@ class NvgtBridgeService : AccessibilityService() {
 		accessibilityManager?.removeAccessibilityServicesStateChangeListener(servicesStateChangeListener)
 		handler.removeCallbacks(updateRunnable)
 		targetCache.clear()
+		directTypingCache.clear()
 	}
 
 	override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -204,23 +208,17 @@ class NvgtBridgeService : AccessibilityService() {
 			return true
 		}
 
-		val pm = packageManager
-		var isNvgt = false
-		try {
-			val appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-			isNvgt = appInfo.metaData?.getBoolean(NVGT_METADATA_KEY, false) == true
-			
-			if (!isNvgt) {
-				val launchIntent = pm.getLaunchIntentForPackage(packageName)
-				launchIntent?.component?.let { component ->
-					val activityInfo = pm.getActivityInfo(component, PackageManager.GET_META_DATA)
-					isNvgt = activityInfo.metaData?.getBoolean(NVGT_METADATA_KEY, false) == true
-				}
-			}
-		} catch (_: Exception) {}
-
+		val isNvgt = NvgtUtils.hasNvgtSupport(packageManager, packageName)
 		targetCache[packageName] = isNvgt
 		return isNvgt
+	}
+
+	private fun isDirectTypingEnabled(packageName: String): Boolean {
+		directTypingCache[packageName]?.let { return it }
+		
+		val isEnabled = prefs.getBoolean("direct_typing_$packageName", false)
+		directTypingCache[packageName] = isEnabled
+		return isEnabled
 	}
 
 	private fun enableDirectTouch() {
@@ -243,11 +241,19 @@ class NvgtBridgeService : AccessibilityService() {
 		val finalRegion = Region(0, 0, metrics.widthPixels, metrics.heightPixels)
 		val windowBounds = Rect()
 
+		val directTyping = isDirectTypingEnabled(currentPkg)
+
 		windows.forEach { window ->
-			if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD || 
+			val shouldSubtract = if (directTyping) {
 				window.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
-				window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) {
-				
+				window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+			} else {
+				window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD || 
+				window.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
+				window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+			}
+			
+			if (shouldSubtract) {
 				window.getBoundsInScreen(windowBounds)
 				finalRegion.op(windowBounds, Region.Op.DIFFERENCE)
 			}
@@ -268,3 +274,4 @@ class NvgtBridgeService : AccessibilityService() {
 		}
 	}
 }
+

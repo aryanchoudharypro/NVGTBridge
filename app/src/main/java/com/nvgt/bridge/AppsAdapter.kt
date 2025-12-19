@@ -6,11 +6,13 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.RecyclerView
 
 class AppsAdapter(
 	private val apps: MutableList<AppInfo>,
-	private val onSwitchChanged: (AppInfo, Boolean) -> Unit
+	private val onSwitchChanged: (AppInfo, Boolean) -> Unit,
+	private val onAppLongClicked: (AppInfo) -> Unit
 ) : RecyclerView.Adapter<AppsAdapter.ViewHolder>() {
 
 	private var filteredApps: MutableList<AppInfo> = apps.toMutableList()
@@ -34,6 +36,19 @@ class AppsAdapter(
 			app.isEnabled = newState
 			holder.appSwitch.isChecked = newState
 			onSwitchChanged(app, newState)
+		}
+		
+		holder.itemView.setOnLongClickListener {
+			onAppLongClicked(app)
+			true
+		}
+
+		ViewCompat.addAccessibilityAction(
+			holder.itemView,
+			"Configure settings for ${app.name}"
+		) { _, _ ->
+			onAppLongClicked(app)
+			true
 		}
 		
 		holder.appSwitch.setOnClickListener {

@@ -1,11 +1,12 @@
 package com.nvgt.bridge
 
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
 import android.widget.EditText
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -38,20 +39,24 @@ class SettingsActivity : AppCompatActivity() {
 		val recyclerView: RecyclerView = findViewById(R.id.apps_recycler_view)
 		recyclerView.layoutManager = LinearLayoutManager(this)
 		
-		appsAdapter = AppsAdapter(appsList) { app, isEnabled ->
-			val index = appsList.indexOfFirst { it.packageName == app.packageName }
-			if (index != -1) {
-				appsList[index].isEnabled = isEnabled
-				
-				if (isEnabled) {
-					enabledApps.add(app.packageName)
-				} else {
-					enabledApps.remove(app.packageName)
+		appsAdapter = AppsAdapter(appsList, 
+			onSwitchChanged = { app, isEnabled ->
+				val index = appsList.indexOfFirst { it.packageName == app.packageName }
+				if (index != -1) {
+					appsList[index].isEnabled = isEnabled
+					
+					if (isEnabled) {
+						enabledApps.add(app.packageName)
+					} else {
+						enabledApps.remove(app.packageName)
+					}
+					saveEnabledApps()
 				}
-				saveEnabledApps()
+			},
+			onAppLongClicked = { app ->
+				showAppConfigDialog(app)
 			}
-			Log.d("SettingsActivity", "App ${app.name} isEnabled: $isEnabled")
-		}
+		)
 		recyclerView.adapter = appsAdapter
 
 		val searchEditText: EditText = findViewById(R.id.search_edit_text)
@@ -66,21 +71,69 @@ class SettingsActivity : AppCompatActivity() {
 		})
 	}
 
+	private fun showAppConfigDialog(app: AppInfo) {
+		val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
+		val keyDirectTyping = "direct_typing_${app.packageName}"
+		
+		var isDirectTyping = prefs.getBoolean(keyDirectTyping, false)
+
+		val builder = AlertDialog.Builder(this)
+		builder.setTitle("Configure settings for ${app.name}")
+		
+		val options = arrayOf("Direct Typing (Don't cut out keyboard)")
+		val checkedItems = booleanArrayOf(isDirectTyping)
+
+		builder.setMultiChoiceItems(options, checkedItems) { _, which, isChecked ->
+			if (which == 0) {
+				isDirectTyping = isChecked
+			}
+		}
+
+		builder.setPositiveButton("Save") { _, _ ->
+			prefs.edit().putBoolean(keyDirectTyping, isDirectTyping).apply()
+			
+			app.directTyping = isDirectTyping
+			appsAdapter.notifyDataSetChanged()
+		}
+
+		builder.setNegativeButton("Cancel", null)
+		builder.show()
+	}
+
 	private fun loadInstalledApps() {
 		val pm = packageManager
 		val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+		val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
 		
 		val tempAppList = mutableListOf<AppInfo>()
+		var newNativeAppsFound = false
 		
 		for (packageInfo in packages) {
 			if (pm.getLaunchIntentForPackage(packageInfo.packageName) != null) {
 				val appName = packageInfo.loadLabel(pm).toString()
 				val appIcon = packageInfo.loadIcon(pm)
 				val packageName = packageInfo.packageName
-				val isEnabled = enabledApps.contains(packageName)
-				tempAppList.add(AppInfo(appName, packageName, appIcon, isEnabled))
+				
+				var isEnabled = enabledApps.contains(packageName)
+				
+				if (!isEnabled) {
+					if (NvgtUtils.hasNvgtSupport(pm, packageName)) {
+						isEnabled = true
+						enabledApps.add(packageName)
+						newNativeAppsFound = true
+					}
+				}
+				
+				val directTyping = prefs.getBoolean("direct_typing_$packageName", false)
+
+				tempAppList.add(AppInfo(appName, packageName, appIcon, isEnabled, directTyping))
 			}
 		}
+		
+		if (newNativeAppsFound) {
+			saveEnabledApps()
+		}
+
 		tempAppList.sortBy { it.name }
 		
 		appsList.clear()
