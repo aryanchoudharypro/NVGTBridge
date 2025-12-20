@@ -8,6 +8,7 @@ import android.text.TextWatcher
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -24,6 +25,14 @@ class SettingsActivity : AppCompatActivity() {
 
 		val toolbar: Toolbar = findViewById(R.id.toolbar)
 		setSupportActionBar(toolbar)
+
+		val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
+
+		val hapticSwitch: SwitchCompat = findViewById(R.id.master_haptic_switch)
+		hapticSwitch.isChecked = prefs.getBoolean("haptics_enabled", true)
+		hapticSwitch.setOnCheckedChangeListener { _, isChecked ->
+			prefs.edit().putBoolean("haptics_enabled", isChecked).apply()
+		}
 
 		loadEnabledApps()
 		

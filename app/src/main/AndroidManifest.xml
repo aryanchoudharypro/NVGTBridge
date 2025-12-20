@@ -1,34 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+	xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission
-        android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+	<uses-permission
+		android:name="android.permission.QUERY_ALL_PACKAGES"
+		tools:ignore="QueryAllPackagesPermission" />
+	<uses-permission android:name="android.permission.VIBRATE" />
 
-    <application
-        android:allowBackup="true"
-        android:label="@string/app_name"
-        android:supportsRtl="true"
-        tools:targetApi="31">
+	<application
+		android:allowBackup="true"
+		android:label="@string/app_name"
+		android:supportsRtl="true"
+		tools:targetApi="31">
 
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="true"
-            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+		<activity
+			android:name=".SettingsActivity"
+			android:exported="true"
+			android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
 
-        <service
-            android:name=".NvgtBridgeService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
+		<service
+			android:name=".NvgtBridgeService"
+			android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+			android:exported="true">
+			<intent-filter>
+				<action android:name="android.accessibilityservice.AccessibilityService" />
+			</intent-filter>
+			<meta-data
+				android:name="android.accessibilityservice"
+				android:resource="@xml/accessibility_service_config" />
+		</service>
 
-    </application>
+		<service
+			android:name=".BridgeTileService"
+			android:icon="@mipmap/ic_launcher"
+			android:label="Bridge Toggle"
+			android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+			android:exported="true">
+			<intent-filter>
+				<action android:name="android.service.quicksettings.action.QS_TILE" />
+			</intent-filter>
+		</service>
+
+	</application>
 
 </manifest>

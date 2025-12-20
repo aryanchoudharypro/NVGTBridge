@@ -7,12 +7,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.graphics.Region
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
@@ -23,6 +25,8 @@ class NvgtBridgeService : AccessibilityService() {
 	companion object {
 		private const val PREFS_NAME = "nvgt_bridge_prefs"
 		private const val KEY_ENABLED_APPS = "enabled_app_packages"
+		private const val KEY_MASTER_SWITCH = "master_switch"
+		private const val KEY_HAPTICS_ENABLED = "haptics_enabled"
 		private const val DEBOUNCE_DELAY = 150L
 		
 		private val IGNORED_SYSTEM_PACKAGES = setOf(
@@ -39,6 +43,13 @@ class NvgtBridgeService : AccessibilityService() {
 	private var accessibilityManager: AccessibilityManager? = null
 	private val targetCache = mutableMapOf<String, Boolean>()
 	private val directTypingCache = mutableMapOf<String, Boolean>()
+	
+	private var vibrator: Vibrator? = null
+	private var lastPassthroughState = false
+	private val hapticAttributes = AudioAttributes.Builder()
+		.setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+		.setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+		.build()
 	
 	private val handler = Handler(Looper.getMainLooper())
 	private val updateRunnable = Runnable { performUpdate() }
@@ -64,6 +75,9 @@ class NvgtBridgeService : AccessibilityService() {
 		if (key != null && key.startsWith("direct_typing_")) {
 			directTypingCache.clear()
 		}
+		if (key == KEY_MASTER_SWITCH) {
+			performUpdate()
+		}
 	}
 
 	override fun onServiceConnected() {
@@ -74,6 +88,8 @@ class NvgtBridgeService : AccessibilityService() {
 		accessibilityManager = getSystemService(ACCESSIBILITY_SERVICE) as? AccessibilityManager
 		accessibilityManager?.addAccessibilityServicesStateChangeListener(servicesStateChangeListener)
 		
+		vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+
 		val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
 		registerReceiver(screenReceiver, filter)
 		
@@ -115,6 +131,14 @@ class NvgtBridgeService : AccessibilityService() {
 	}
 
 	private fun performUpdate() {
+		val isMasterEnabled = prefs.getBoolean(KEY_MASTER_SWITCH, true)
+		if (!isMasterEnabled) {
+			if (currentNvgtPackage != null) {
+				disableDirectTouch()
+			}
+			return
+		}
+
 		val allWindows = windows
 		val rootWindow = allWindows.find { it.isFocused } ?: allWindows.firstOrNull()
 		val currentAppPackage = rootWindow?.root?.packageName?.toString() ?: return
@@ -221,8 +245,46 @@ class NvgtBridgeService : AccessibilityService() {
 		return isEnabled
 	}
 
+	private fun playHapticFeedback(isEnabled: Boolean) {
+		val hapticsOn = prefs.getBoolean(KEY_HAPTICS_ENABLED, true)
+		if (!hapticsOn) return
+		if (lastPassthroughState == isEnabled) return
+		lastPassthroughState = isEnabled
+
+		val vib = vibrator ?: return
+		if (!vib.hasVibrator()) return
+
+		try {
+			if (isEnabled) {
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+					val effect = VibrationEffect.createWaveform(
+						longArrayOf(0, 30, 50, 30), 
+						intArrayOf(0, 255, 0, 255), 
+						-1
+					)
+					vib.vibrate(effect, hapticAttributes)
+				} else {
+					@Suppress("DEPRECATION")
+					vib.vibrate(longArrayOf(0, 30, 50, 30), -1, hapticAttributes)
+				}
+			} else {
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+					val effect = VibrationEffect.createOneShot(100, 255)
+					vib.vibrate(effect, hapticAttributes)
+				} else {
+					@Suppress("DEPRECATION")
+					vib.vibrate(100, hapticAttributes)
+				}
+			}
+		} catch (_: Exception) {
+			@Suppress("DEPRECATION")
+			vib.vibrate(100)
+		}
+	}
+
 	private fun enableDirectTouch() {
 		updatePassthroughRegion()
+		playHapticFeedback(true)
 	}
 
 	private fun disableDirectTouch(keepPackage: Boolean = false) {
@@ -231,6 +293,7 @@ class NvgtBridgeService : AccessibilityService() {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 			setTouchExplorationPassthroughRegion(0, Region())
 		}
+		playHapticFeedback(false)
 	}
 
 	private fun updatePassthroughRegion() {
@@ -274,4 +337,3 @@ class NvgtBridgeService : AccessibilityService() {
 		}
 	}
 }
-
