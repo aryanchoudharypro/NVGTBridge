@@ -44,7 +44,7 @@ On Android 13 and newer, you might see an error saying **"Restricted setting: Fo
 
 ### How it Works
 
-* **Automatic Mode:** When you open a game you have enabled, the Bridge automatically lets you touch the screen directly. You don't need to suspend TalkBack manually.
+* **Automatic Mode:** When you open a game you have enabled, the Bridge automatically lets you touch the screen directly. You don't need to suspend or tirn TalkBack off manually.
 * **Safety Features:** TalkBack resumes normal behavior if you open the keyboard, pull down notifications, or lock the screen.
 
 ---
