@@ -16,6 +16,8 @@ Since this is a system utility, it does not appear in your app drawer. You must 
 Download the NVGT Bridge APK.
 
 > **Note on Installation:** Android's "Play Protect" may flag this app because it uses high-level accessibility permissions. Furthermore, standard package installers might trigger "Restricted Settings" on newer Android versions. To ensure the service can be enabled, it is highly recommended to use a **Session-Based Installer** (such as the "App Manager" app from F-Droid or GitHub). These installers use the modern Android `PackageInstaller` session API, which helps bypass some security restrictions.
+You can also use **ADB** directly. 
+
 
 #### 2. Allow Restricted Settings (If Necessary)
 
@@ -42,7 +44,7 @@ On Android 13 and newer, you might see an error saying **"Restricted setting: Fo
 
 ### How it Works
 
-* **Automatic Mode:** When you open a game you have enabled, the Bridge automatically lets you touch the screen directly. You don't need to suspend TalkBack manually.
+* **Automatic Mode:** When you open a game you have enabled, the Bridge automatically lets you touch the screen directly. You don't need to suspend or tirn TalkBack off manually.
 * **Safety Features:** TalkBack resumes normal behavior if you open the keyboard, pull down notifications, or lock the screen.
 
 ---
