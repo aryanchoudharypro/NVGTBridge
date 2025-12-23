@@ -18,6 +18,7 @@ class SettingsActivity : AppCompatActivity() {
 	private lateinit var appsAdapter: AppsAdapter
 	private val appsList = mutableListOf<AppInfo>()
 	private val enabledApps = mutableSetOf<String>()
+	private var currentSearchQuery = ""
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -36,19 +37,10 @@ class SettingsActivity : AppCompatActivity() {
 
 		loadEnabledApps()
 		
-		Thread {
-			loadInstalledApps()
-			runOnUiThread {
-				if (::appsAdapter.isInitialized) {
-					appsAdapter.filter("")
-				}
-			}
-		}.start()
-
 		val recyclerView: RecyclerView = findViewById(R.id.apps_recycler_view)
 		recyclerView.layoutManager = LinearLayoutManager(this)
 		
-		appsAdapter = AppsAdapter(appsList, 
+		appsAdapter = AppsAdapter(emptyList(), 
 			onSwitchChanged = { app, isEnabled ->
 				val index = appsList.indexOfFirst { it.packageName == app.packageName }
 				if (index != -1) {
@@ -60,6 +52,9 @@ class SettingsActivity : AppCompatActivity() {
 						enabledApps.remove(app.packageName)
 					}
 					saveEnabledApps()
+					
+					// Update list to reflect move between sections
+					updateAppList(currentSearchQuery)
 				}
 			},
 			onAppLongClicked = { app ->
@@ -68,16 +63,49 @@ class SettingsActivity : AppCompatActivity() {
 		)
 		recyclerView.adapter = appsAdapter
 
+		Thread {
+			loadInstalledApps()
+			runOnUiThread {
+				updateAppList(currentSearchQuery)
+			}
+		}.start()
+
 		val searchEditText: EditText = findViewById(R.id.search_edit_text)
 		searchEditText.addTextChangedListener(object : TextWatcher {
 			override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
 
 			override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-				appsAdapter.filter(s.toString())
+				currentSearchQuery = s.toString()
+				updateAppList(currentSearchQuery)
 			}
 
 			override fun afterTextChanged(s: Editable?) {}
 		})
+	}
+
+	private fun updateAppList(query: String) {
+		val filtered = if (query.isEmpty()) {
+			appsList
+		} else {
+			appsList.filter { it.name.contains(query, ignoreCase = true) }
+		}
+
+		val enabled = filtered.filter { it.isEnabled }.sortedBy { it.name }
+		val disabled = filtered.filter { !it.isEnabled }.sortedBy { it.name }
+
+		val newItems = mutableListOf<AppListItem>()
+
+		if (enabled.isNotEmpty()) {
+			newItems.add(AppListItem.Header("Direct Touch Enabled Apps"))
+			newItems.addAll(enabled.map { AppListItem.App(it) })
+		}
+
+		if (disabled.isNotEmpty()) {
+			newItems.add(AppListItem.Header("All Apps"))
+			newItems.addAll(disabled.map { AppListItem.App(it) })
+		}
+
+		appsAdapter.updateItems(newItems)
 	}
 
 	private fun showAppConfigDialog(app: AppInfo) {
