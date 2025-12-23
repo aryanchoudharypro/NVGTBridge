@@ -1,11 +1,18 @@
 package com.nvgt.bridge
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.EditText
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
@@ -16,6 +23,10 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -23,6 +34,22 @@ class SettingsActivity : AppCompatActivity() {
 	private val appsList = mutableListOf<AppInfo>()
 	private val enabledApps = mutableSetOf<String>()
 	private var currentSearchQuery = ""
+
+	private val backupLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+		if (result.resultCode == Activity.RESULT_OK) {
+			result.data?.data?.let { uri ->
+				performBackup(uri)
+			}
+		}
+	}
+
+	private val restoreLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+		if (result.resultCode == Activity.RESULT_OK) {
+			result.data?.data?.let { uri ->
+				performRestore(uri)
+			}
+		}
+	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -199,6 +226,130 @@ class SettingsActivity : AppCompatActivity() {
 		enabledApps.clear()
 		if (savedSet != null) {
 			enabledApps.addAll(savedSet)
+		}
+	}
+
+	override fun onCreateOptionsMenu(menu: Menu): Boolean {
+		menuInflater.inflate(R.menu.settings_menu, menu)
+		return true
+	}
+
+	override fun onOptionsItemSelected(item: MenuItem): Boolean {
+		return when (item.itemId) {
+			R.id.action_backup -> {
+				val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+					addCategory(Intent.CATEGORY_OPENABLE)
+					type = "application/json"
+					putExtra(Intent.EXTRA_TITLE, "nvgt_bridge_backup.json")
+				}
+				backupLauncher.launch(intent)
+				true
+			}
+			R.id.action_restore -> {
+				val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+					addCategory(Intent.CATEGORY_OPENABLE)
+					type = "application/json"
+				}
+				restoreLauncher.launch(intent)
+				true
+			}
+			else -> super.onOptionsItemSelected(item)
+		}
+	}
+
+	private fun performBackup(uri: Uri) {
+		lifecycleScope.launch(Dispatchers.IO) {
+			try {
+				val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
+				val root = JSONObject()
+				
+				val appsArray = JSONArray()
+				enabledApps.forEach { appsArray.put(it) }
+				root.put("enabled_apps", appsArray)
+				
+				root.put("haptics_enabled", prefs.getBoolean("haptics_enabled", true))
+
+				// Backup direct typing settings
+				val directTypingObj = JSONObject()
+				prefs.all.keys.filter { it.startsWith("direct_typing_") }.forEach { key ->
+					directTypingObj.put(key, prefs.getBoolean(key, false))
+				}
+				root.put("direct_typing", directTypingObj)
+
+				contentResolver.openOutputStream(uri)?.use { outputStream ->
+					outputStream.write(root.toString(4).toByteArray())
+				}
+
+				withContext(Dispatchers.Main) {
+					Toast.makeText(this@SettingsActivity, R.string.backup_success, Toast.LENGTH_SHORT).show()
+				}
+			} catch (e: Exception) {
+				withContext(Dispatchers.Main) {
+					Toast.makeText(this@SettingsActivity, R.string.error_backup, Toast.LENGTH_SHORT).show()
+				}
+			}
+		}
+	}
+
+	private fun performRestore(uri: Uri) {
+		lifecycleScope.launch(Dispatchers.IO) {
+			try {
+				val stringBuilder = StringBuilder()
+				contentResolver.openInputStream(uri)?.use { inputStream ->
+					BufferedReader(InputStreamReader(inputStream)).use { reader ->
+						var line: String? = reader.readLine()
+						while (line != null) {
+							stringBuilder.append(line)
+							line = reader.readLine()
+						}
+					}
+				}
+
+				val root = JSONObject(stringBuilder.toString())
+				val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
+				val editor = prefs.edit()
+
+				if (root.has("enabled_apps")) {
+					val appsArray = root.getJSONArray("enabled_apps")
+					val newEnabledApps = mutableSetOf<String>()
+					for (i in 0 until appsArray.length()) {
+						newEnabledApps.add(appsArray.getString(i))
+					}
+					editor.putStringSet("enabled_app_packages", newEnabledApps)
+					enabledApps.clear()
+					enabledApps.addAll(newEnabledApps)
+				}
+
+				if (root.has("haptics_enabled")) {
+					editor.putBoolean("haptics_enabled", root.getBoolean("haptics_enabled"))
+				}
+
+				if (root.has("direct_typing")) {
+					val directTypingObj = root.getJSONObject("direct_typing")
+					val keys = directTypingObj.keys()
+					while (keys.hasNext()) {
+						val key = keys.next()
+						editor.putBoolean(key, directTypingObj.getBoolean(key))
+					}
+				}
+
+				editor.apply()
+
+				withContext(Dispatchers.Main) {
+					// Refresh UI
+					val hapticSwitch: SwitchCompat = findViewById(R.id.master_haptic_switch)
+					hapticSwitch.isChecked = prefs.getBoolean("haptics_enabled", true)
+					
+					loadInstalledApps() // Reloads list and refreshes adapter
+					updateAppList(currentSearchQuery)
+					
+					Toast.makeText(this@SettingsActivity, R.string.restore_success, Toast.LENGTH_SHORT).show()
+				}
+			} catch (e: Exception) {
+				withContext(Dispatchers.Main) {
+					Toast.makeText(this@SettingsActivity, R.string.error_restore, Toast.LENGTH_SHORT).show()
+				}
+			}
 		}
 	}
 }

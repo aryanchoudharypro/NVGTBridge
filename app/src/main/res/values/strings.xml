@@ -1,3 +1,11 @@
 <resources>
-    <string name="app_name">NVGT Bridge</string>
+	<string name="app_name">NVGT Bridge</string>
+	<string name="accessibility_service_description">Automatically bridges the gap between TalkBack and audio games. Enables Direct Touch when you enter a supported game and restores TalkBack for menus and keyboards.</string>
+	<string name="action_backup">Backup Settings</string>
+	<string name="action_restore">Restore Settings</string>
+	<string name="backup_success">Settings backed up successfully.</string>
+	<string name="restore_success">Settings restored successfully.</string>
+	<string name="error_backup">Failed to backup settings.</string>
+	<string name="error_restore">Failed to restore settings.</string>
+	<string name="error_invalid_file">Invalid backup file.</string>
 </resources>
