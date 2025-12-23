@@ -13,8 +13,10 @@ import android.media.AudioAttributes
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
@@ -88,7 +90,13 @@ class NvgtBridgeService : AccessibilityService() {
 		accessibilityManager = getSystemService(ACCESSIBILITY_SERVICE) as? AccessibilityManager
 		accessibilityManager?.addAccessibilityServicesStateChangeListener(servicesStateChangeListener)
 		
-		vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+		vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+			val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+			vibratorManager.defaultVibrator
+		} else {
+			@Suppress("DEPRECATION")
+			getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+		}
 
 		val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
 		registerReceiver(screenReceiver, filter)
@@ -215,10 +223,8 @@ class NvgtBridgeService : AccessibilityService() {
 		for (i in 0 until node.childCount) {
 			val child = node.getChild(i) ?: continue
 			if (scanNodeForDialogs(child, depth + 1)) {
-				child.recycle()
 				return true
 			}
-			child.recycle()
 		}
 		return false
 	}
@@ -255,26 +261,34 @@ class NvgtBridgeService : AccessibilityService() {
 		if (!vib.hasVibrator()) return
 
 		try {
-			if (isEnabled) {
-				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-					val effect = VibrationEffect.createWaveform(
-						longArrayOf(0, 30, 50, 30), 
-						intArrayOf(0, 255, 0, 255), 
-						-1
-					)
-					vib.vibrate(effect, hapticAttributes)
+			val effect = if (isEnabled) {
+				val supportsPrimitives = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+					vib.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)
 				} else {
-					@Suppress("DEPRECATION")
-					vib.vibrate(longArrayOf(0, 30, 50, 30), -1, hapticAttributes)
+					false
+				}
+
+				if (supportsPrimitives && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+					VibrationEffect.startComposition()
+						.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK)
+						.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 1.0f, 100)
+						.compose()
+				} else {
+					VibrationEffect.createWaveform(longArrayOf(0, 15, 100, 15), -1)
 				}
 			} else {
-				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-					val effect = VibrationEffect.createOneShot(100, 255)
-					vib.vibrate(effect, hapticAttributes)
-				} else {
-					@Suppress("DEPRECATION")
-					vib.vibrate(100, hapticAttributes)
-				}
+				VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
+			}
+
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+				val attributes = VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ACCESSIBILITY)
+				vib.vibrate(effect, attributes)
+			} else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+				@Suppress("DEPRECATION")
+				vib.vibrate(effect, hapticAttributes)
+			} else {
+				@Suppress("DEPRECATION")
+				vib.vibrate(100)
 			}
 		} catch (_: Exception) {
 			@Suppress("DEPRECATION")

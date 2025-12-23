@@ -10,8 +10,12 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.appcompat.widget.Toolbar
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -54,7 +58,9 @@ class SettingsActivity : AppCompatActivity() {
 					saveEnabledApps()
 					
 					// Update list to reflect move between sections
-					updateAppList(currentSearchQuery)
+					lifecycleScope.launch {
+						updateAppList(currentSearchQuery)
+					}
 				}
 			},
 			onAppLongClicked = { app ->
@@ -63,12 +69,10 @@ class SettingsActivity : AppCompatActivity() {
 		)
 		recyclerView.adapter = appsAdapter
 
-		Thread {
+		lifecycleScope.launch {
 			loadInstalledApps()
-			runOnUiThread {
-				updateAppList(currentSearchQuery)
-			}
-		}.start()
+			updateAppList(currentSearchQuery)
+		}
 
 		val searchEditText: EditText = findViewById(R.id.search_edit_text)
 		searchEditText.addTextChangedListener(object : TextWatcher {
@@ -76,33 +80,38 @@ class SettingsActivity : AppCompatActivity() {
 
 			override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
 				currentSearchQuery = s.toString()
-				updateAppList(currentSearchQuery)
+				lifecycleScope.launch {
+					updateAppList(currentSearchQuery)
+				}
 			}
 
 			override fun afterTextChanged(s: Editable?) {}
 		})
 	}
 
-	private fun updateAppList(query: String) {
-		val filtered = if (query.isEmpty()) {
-			appsList
-		} else {
-			appsList.filter { it.name.contains(query, ignoreCase = true) }
-		}
+	private suspend fun updateAppList(query: String) {
+		val newItems = withContext(Dispatchers.Default) {
+			val filtered = if (query.isEmpty()) {
+				appsList
+			} else {
+				appsList.filter { it.name.contains(query, ignoreCase = true) }
+			}
 
-		val enabled = filtered.filter { it.isEnabled }.sortedBy { it.name }
-		val disabled = filtered.filter { !it.isEnabled }.sortedBy { it.name }
+			val enabled = filtered.filter { it.isEnabled }.sortedBy { it.name }
+			val disabled = filtered.filter { !it.isEnabled }.sortedBy { it.name }
 
-		val newItems = mutableListOf<AppListItem>()
+			val items = mutableListOf<AppListItem>()
 
-		if (enabled.isNotEmpty()) {
-			newItems.add(AppListItem.Header("Direct Touch Enabled Apps"))
-			newItems.addAll(enabled.map { AppListItem.App(it) })
-		}
+			if (enabled.isNotEmpty()) {
+				items.add(AppListItem.Header("Direct Touch Enabled Apps"))
+				items.addAll(enabled.map { AppListItem.App(it) })
+			}
 
-		if (disabled.isNotEmpty()) {
-			newItems.add(AppListItem.Header("All Apps"))
-			newItems.addAll(disabled.map { AppListItem.App(it) })
+			if (disabled.isNotEmpty()) {
+				items.add(AppListItem.Header("All Apps"))
+				items.addAll(disabled.map { AppListItem.App(it) })
+			}
+			items
 		}
 
 		appsAdapter.updateItems(newItems)
@@ -137,44 +146,46 @@ class SettingsActivity : AppCompatActivity() {
 		builder.show()
 	}
 
-	private fun loadInstalledApps() {
-		val pm = packageManager
-		val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-		val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
-		
-		val tempAppList = mutableListOf<AppInfo>()
-		var newNativeAppsFound = false
-		
-		for (packageInfo in packages) {
-			if (pm.getLaunchIntentForPackage(packageInfo.packageName) != null) {
-				val appName = packageInfo.loadLabel(pm).toString()
-				val appIcon = packageInfo.loadIcon(pm)
-				val packageName = packageInfo.packageName
-				
-				var isEnabled = enabledApps.contains(packageName)
-				
-				if (!isEnabled) {
-					if (NvgtUtils.hasNvgtSupport(pm, packageName)) {
-						isEnabled = true
-						enabledApps.add(packageName)
-						newNativeAppsFound = true
+	private suspend fun loadInstalledApps() {
+		withContext(Dispatchers.IO) {
+			val pm = packageManager
+			val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+			val prefs = getSharedPreferences("nvgt_bridge_prefs", Context.MODE_PRIVATE)
+			
+			val tempAppList = mutableListOf<AppInfo>()
+			var newNativeAppsFound = false
+			
+			for (packageInfo in packages) {
+				if (pm.getLaunchIntentForPackage(packageInfo.packageName) != null) {
+					val appName = packageInfo.loadLabel(pm).toString()
+					val appIcon = packageInfo.loadIcon(pm)
+					val packageName = packageInfo.packageName
+					
+					var isEnabled = enabledApps.contains(packageName)
+					
+					if (!isEnabled) {
+						if (NvgtUtils.hasNvgtSupport(pm, packageName)) {
+							isEnabled = true
+							enabledApps.add(packageName)
+							newNativeAppsFound = true
+						}
 					}
+					
+					val directTyping = prefs.getBoolean("direct_typing_$packageName", false)
+
+					tempAppList.add(AppInfo(appName, packageName, appIcon, isEnabled, directTyping))
 				}
-				
-				val directTyping = prefs.getBoolean("direct_typing_$packageName", false)
-
-				tempAppList.add(AppInfo(appName, packageName, appIcon, isEnabled, directTyping))
 			}
-		}
-		
-		if (newNativeAppsFound) {
-			saveEnabledApps()
-		}
+			
+			if (newNativeAppsFound) {
+				saveEnabledApps()
+			}
 
-		tempAppList.sortBy { it.name }
-		
-		appsList.clear()
-		appsList.addAll(tempAppList)
+			tempAppList.sortBy { it.name }
+			
+			appsList.clear()
+			appsList.addAll(tempAppList)
+		}
 	}
 
 	private fun saveEnabledApps() {

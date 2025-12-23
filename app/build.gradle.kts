@@ -60,6 +60,8 @@ dependencies {
 	implementation(libs.material)
 	implementation(libs.androidx.constraintlayout)
 	implementation(libs.androidx.recyclerview)
+	implementation(libs.kotlinx.coroutines.android)
+	implementation(libs.androidx.lifecycle.runtime.ktx)
 	testImplementation(libs.junit)
 	androidTestImplementation(libs.androidx.junit)
 	androidTestImplementation(libs.androidx.espresso.core)
