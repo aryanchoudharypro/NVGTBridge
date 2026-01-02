@@ -71,6 +71,7 @@ class AppsAdapter(
 					true
 				}
 
+				ViewCompat.setAccessibilityDelegate(appHolder.itemView, null)
 				ViewCompat.addAccessibilityAction(
 					appHolder.itemView,
 					"Configure settings for ${app.name}"
